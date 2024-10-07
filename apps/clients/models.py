@@ -1,7 +1,6 @@
 import re
 
 from django.db import models
-from django.utils import timezone
 from django_fsm import FSMField, transition
 
 from apps.company.models import Company

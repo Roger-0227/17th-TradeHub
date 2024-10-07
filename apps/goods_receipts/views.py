@@ -257,16 +257,14 @@ def update_state(sender, instance, **kwargs):
     receipts_items = GoodsReceiptProductItem.objects.filter(goods_receipt=instance)
 
     post_save.disconnect(update_state, sender=GoodsReceipt)
-    for item in receipts_items:
-        if item.received_quantity < item.ordered_quantity:
-            if instance.is_finished and item.received_quantity != 0:
-                instance.note += f"入庫{item.received_quantity}個：{item.product}，剩餘{item.ordered_quantity}個{time_now}\n"
-                inventory = Inventory.objects.filter(
-                    product=item.product, user=instance.user
-                ).first()
-
-                if inventory:
-                    with transaction.atomic():
+    if instance.is_finished:
+        for item in receipts_items:
+            if item.received_quantity != 0:
+                if item.received_quantity < item.ordered_quantity:
+                    inventory = Inventory.objects.filter(
+                        product=item.product, user=instance.user
+                    ).first()
+                    if inventory:
                         quantity = inventory.quantity + item.received_quantity
                         note = (
                             inventory.note
@@ -277,60 +275,43 @@ def update_state(sender, instance, **kwargs):
                             last_updated=timezone.now(),
                             note=note,
                         )
-                # else:
-                #     Inventory.objects.create(
-                #         product=item.product,
-                #         supplier=instance.supplier,
-                #         quantity=item.received_quantity,
-                #         safety_stock=0,
-                #         note=f"新進貨物{item.product}：{item.received_quantity}個，供應商：{instance.supplier}，收據號碼：{instance.supplier}，收據號碼：{instance.order_number}{time_now}",
-                #         last_updated=time_now,
-                #     )
-                item.ordered_quantity -= item.received_quantity
-                item.received_quantity = 0
-                item.save(update_fields=["received_quantity", "ordered_quantity"])
-
-        if item.received_quantity == item.ordered_quantity:
-            if instance.is_finished and item.received_quantity != 0:
-                inventory = Inventory.objects.filter(
-                    product=item.product, user=instance.user
-                ).first()
-                if inventory:
-
-                    with transaction.atomic():
-                        inventory.quantity += item.received_quantity
-                        inventory.last_updated = time_now
-                        inventory.note += f"入庫{item.received_quantity}個：{item.product}{time_now}\n"
-                        inventory.save()
-                # else:
-                #     Inventory.objects.create(
-                #         product=item.product,
-                #         supplier=instance.supplier,
-                #         quantity=item.received_quantity,
-                #         safety_stock=0,
-                #         note=f"新進貨物{item.product}：{item.received_quantity}個，供應商：{instance.supplier}，收據號碼：{instance.receipt_number}{time_now}",
-                #         last_updated=time_now,
-                #     )
-
-                instance.note += (
-                    f"入庫{item.received_quantity}個：{item.product}{time_now}"
-                )
-                item.ordered_quantity = 0
-                item.received_quantity = 0
-                item.save(update_fields=["received_quantity", "ordered_quantity"])
-    instance.is_finished = False
+                    instance.note += f"入庫{item.received_quantity}個：{item.product}，剩餘{item.ordered_quantity}個{time_now}\n"
+                    item.ordered_quantity -= item.received_quantity
+                    item.received_quantity = 0
+                    item.save(update_fields=["received_quantity", "ordered_quantity"])
+                elif item.received_quantity == item.ordered_quantity:
+                    inventory = Inventory.objects.filter(
+                        product=item.product, user=instance.user
+                    ).first()
+                    if inventory:
+                        quantity = inventory.quantity + item.received_quantity
+                        note = (
+                            inventory.note
+                            + f"入庫{item.received_quantity}個：{item.product}{time_now}"
+                        )
+                        Inventory.objects.filter(product=item.product).update(
+                            quantity=quantity,
+                            last_updated=timezone.now(),
+                            note=note,
+                        )
+                    instance.note += (
+                        f"入庫{item.received_quantity}個：{item.product}{time_now}\n"
+                    )
+                    item.ordered_quantity = 0
+                    item.received_quantity = 0
+                    item.save(update_fields=["received_quantity", "ordered_quantity"])
+        instance.is_finished = False
 
     ordered_quantity = [item.ordered_quantity for item in receipts_items]
     received_quantity = [item.received_quantity for item in receipts_items]
 
     if ordered_quantity <= received_quantity:
         instance.set_to_be_stocked()
+        if sum(ordered_quantity) == 0:
+            instance.set_finished()
         instance.save()
-    elif 0 in received_quantity:
+    else:
         instance.set_to_be_restocked()
-        instance.save()
-    if sum(ordered_quantity) == 0:
-        instance.set_finished()
         instance.save()
     post_save.connect(update_state, sender=GoodsReceipt)
 
