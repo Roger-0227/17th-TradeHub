@@ -1,6 +1,8 @@
 from django.db import models, transaction
 from django.utils import timezone
 from django_fsm import FSMField, transition
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 from apps.company.models import Company
 from apps.products.models import Product
@@ -47,11 +49,6 @@ class Inventory(models.Model):
     def __str__(self):
         return f"{self.quantity}"
 
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        self.number = f"I{self.id:03d}"
-        super().save(update_fields=["number"])
-
     OUT_STOCK = "out_stock"
     LOW_STOCK = "low_stock"
     NORMAL = "normal"
@@ -87,3 +84,10 @@ class Inventory(models.Model):
     @transition(field=state, source="*", target=NEW_STOCK)
     def set_new_stock(self):
         pass
+
+
+@receiver(post_save, sender=Inventory)
+def set_number(sender, instance, created, **kwargs):
+    if created and instance.id:
+        instance.number = f"I{instance.id:03d}"
+        instance.save(update_fields=["number"])
